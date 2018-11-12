@@ -30,72 +30,28 @@ class EncoderRNN(nn.Module):
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
         self.gpu = gpu
-        self.embeddings = nn.Embedding(vocab_size, embedding_dim)
+        #self.embeddings = nn.Embedding(vocab_size, embedding_dim)
         self.rnn_type = rnn_type
         self.n_layers = n_layers
         self.bidirectional = bidirectional
 
         if self.rnn_type in ['LSTM', 'GRU']:
             self.rnn = getattr(nn, self.rnn_type)(embedding_dim, hidden_dim, n_layers, dropout=dropout, bidirectional=bidirectional)
-            #self.rnn = getattr(nn, self.rnn_type)(embedding_dim, hidden_dim, n_layers, dropout=dropout, bidirectional=True)
 
-        self.rnn2out = nn.Linear(hidden_dim, vocab_size)
         self.drop = nn.Dropout(dropout)
+        self.dropout = dropout
         self.word_dropout = word_dropout
 
-        self.init_weights()
-
-
-    def init_weights(self):
-        initrange = 0.1
-        self.rnn2out.weight.data.uniform_(-initrange, initrange)
-        self.rnn2out.bias.data.fill_(0)
-
-
-    def forward(self, inp, input_lengths, hidden=None):
-        """
-        inp: batch_size
-        """
-        emb = self.embeddings(inp)                                          # batch_size x embedding_dim
-        if self.word_dropout:
+    def forward(self, emb, s_lengths, hidden=None):
+        seq_len, batch_size, emb_dim = emb.size()
+        #emb = self.drop(emb) # apply a local dropout
+        #emb = self.embeddings(s)                                          # batch_size x embedding_dim
+        if self.dropout:
             emb = self.drop(emb)
-        emb = emb.view(1, -1, self.embedding_dim)                           # 1 x batch_size x embedding_dim
-
-        # 1. with zero-padding
-        #out, hidden = self.rnn(emb, hidden)                                # 1 x batch_size x hidden_dim (out)
-
-        # 2. variable length input
-        packed = pack_padded_sequence(emb, input_lengths.cpu().numpy())
-        ##packed = pack_padded_sequence(emb, input_lengths)
-
-        out, hidden = self.rnn(packed, hidden)
-        #print(out.data.size()) # 256,512 
-        #print(hidden.size()) # 3,256,512
+        packed = pack_padded_sequence(emb, s_lengths.cpu().numpy())
+        out, hidden = self.rnn(packed, hidden)             # hidden => should be the last output
         out, _ = pad_packed_sequence(out)
-        #print(out.size()) # 1,256,512
-
-
-        ##out = out[:, :, :self.hidden_dim] + out[:, :, self.hidden_dim:]  # Sum bidirectional output
-
         return out, hidden
-
-
-    def init_hidden(self, batch_size=1):
-        #h = autograd.Variable(torch.zeros(1, batch_size, self.hidden_dim))
-        if self.rnn_type == 'LSTM':
-            return (autograd.Variable(torch.zeros(self.n_layers, batch_size, self.hidden_dim).cuda()),
-                    autograd.Variable(torch.zeros(self.n_layers, batch_size, self.hidden_dim)).cuda())
-        else:
-            #if self.bidirectional:
-            return autograd.Variable(torch.zeros(self.n_layers, batch_size, self.hidden_dim).cuda())
-            #else:
-            #    return autograd.Variable(torch.zeros(self.n_layers, batch_size, self.hidden_dim).cuda())
-
-
-        if self.gpu:
-            return h.cuda()
-        else:
-            return h
 
 
 class DecoderRNN(nn.Module):
@@ -116,11 +72,9 @@ class DecoderRNN(nn.Module):
             self.rnn = getattr(nn, self.rnn_type)(embedding_dim, hidden_dim, n_layers, dropout=dropout)
 
         self.rnn2out = nn.Linear(hidden_dim, vocab_size)
-
         self.drop = nn.Dropout(dropout)
         self.dropout = dropout
         self.word_dropout = word_dropout
-
         self.init_weights()
 
     def init_weights(self):
@@ -168,7 +122,7 @@ class DecoderRNN(nn.Module):
 class BahdanauAttnDecoderRNN(nn.Module):
     def __init__(self, rnn_type, embedding_dim, hidden_dim, output_size, n_layers=1, dropout=0.1):
         super(BahdanauAttnDecoderRNN, self).__init__()
-        
+
         # Define parameters
         self.rnn_type = rnn_type
         self.hidden_size = hidden_dim
@@ -177,7 +131,7 @@ class BahdanauAttnDecoderRNN(nn.Module):
         self.n_layers = n_layers
         self.dropout = dropout
         self.embedding_dim = embedding_dim
-        
+
         # Define layers
         self.embeddings = nn.Embedding(output_size, embedding_dim)
         self.embedding_dropout = nn.Dropout(dropout)
@@ -188,13 +142,13 @@ class BahdanauAttnDecoderRNN(nn.Module):
             self.rnn = getattr(nn, self.rnn_type)(embedding_dim+hidden_dim, hidden_dim, n_layers, dropout=dropout)
         #self.out = nn.Linear(hidden_dim, output_size)
         self.out = nn.Linear(hidden_dim*2, output_size)
-    
+
     def forward(self, word_input, last_hidden, encoder_outputs):
         # Note: we run this one step at a time
         # TODO: FIX BATCHING
 
         batch_size = word_input.size(0)
-        
+
         # Get the embedding of the current input word (last output word)
         #word_embedded = self.embedding(word_input).view(1, 1, -1) # S=1 x B x N
         #word_embedded = self.dropout(word_embedded)
@@ -202,19 +156,19 @@ class BahdanauAttnDecoderRNN(nn.Module):
         embedded = self.embedding_dropout(embedded)
         embedded = embedded.view(1, batch_size, self.embedding_dim) # S=1 x B x N
 
-        
+
         # Calculate attention weights and apply to encoder outputs
         attn_weights = self.attn(last_hidden[-1], encoder_outputs)
         context = attn_weights.bmm(encoder_outputs.transpose(0, 1)) # B x 1 x N
         context = context.transpose(0, 1) # 1 x B x N
-        
+
         # Combine embedded input word and attended context, run through RNN
         #print(embedded.size()) # 1,1,300
         #print(context.size())  # 1,1,512
         rnn_input = torch.cat((embedded, context), 2)
         #print(rnn_input.size()) # 1,1,812
         output, hidden = self.rnn(rnn_input, last_hidden)
-        
+
         # Final output layer
         output = output.squeeze(0) # B x N
         context = context.squeeze(0) # added: ref: https://github.com/AuCson/PyTorch-Batch-Attention-Seq2seq/blob/master/attentionRNN.py
@@ -222,7 +176,7 @@ class BahdanauAttnDecoderRNN(nn.Module):
         #print(context.size()) # 1x512
         #print( torch.cat((output, context), 1).size() ) # 1x1024
         output = F.log_softmax(self.out(torch.cat((output, context), 1)))
-        
+
         # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights
 
@@ -422,19 +376,19 @@ class EncDec(nn.Module): # really ok to use nn.Module?
         SOS_TOKEN = 2
         EOS_TOKEN = 1
         out_seq = []
-        
+
         ######################
         # encoder initial h
         #####################
         h = self.encoder.init_hidden(1) # (the very first hidden) batch_size = 1
-        
+
         # create input tensor
         inp = Variable(torch.rand(1, max_seq_len).mul(ntokens).long().cuda(), volatile=True)
         for i in range(max_seq_len):
             inp.data[0][i] = EOS_TOKEN
         for i in range(len(example)):
             inp.data[0][i] = example[i]
-        
+
         inp_lengths = torch.cuda.LongTensor( [ len(x)-list(x).count(1) for x in inp.data.cpu().numpy() ] ) # 1: <pad>
         inp = inp.permute(1, 0) # seq_len x bs=1
 
@@ -444,11 +398,11 @@ class EncDec(nn.Module): # really ok to use nn.Module?
         dec_type = self.dec_type
         if dec_type == 'vanilla':
             enc_outs, h = self.encoder(inp, inp_lengths.tolist(), None)
-                
+
         elif dec_type == 'attn':
             enc_outs, h = self.encoder(inp, inp_lengths.tolist(), None)
 
-        
+
         ######################
         #   decoder initial h
         ######################
@@ -471,7 +425,7 @@ class EncDec(nn.Module): # really ok to use nn.Module?
             elif dec_type == 'attn':
                 out, dec_h, dec_attn = self.decoder.forward(dec_inp, dec_h, enc_outs)
                 decoder_attentions[i,:dec_attn.size(2)] += dec_attn.squeeze(0).squeeze(0).cpu().data
-                
+
             # 0: argmax
             if sample_type == 0:
                 dec_inp = out.max(1)[1]
@@ -484,18 +438,18 @@ class EncDec(nn.Module): # really ok to use nn.Module?
                 word_weights = out.squeeze().data.div(temperature).exp().cpu()
                 word_idx = torch.multinomial(word_weights, 1)[0]
                 dec_inp.data.fill_(word_idx)
-            
+
             #dec_inp = out.max(1)[1]
             output_word = inputs.vocab.itos[word_idx]
             out_seq.append(output_word)
-            
+
             if word_idx == EOS_TOKEN:
                 break
 
         # Set back to training mode
         self.encoder.train(True)
         self.decoder.train(True)
-     
+
         if dec_type == 'vanilla':
             return out_seq
         elif dec_type == 'attn':

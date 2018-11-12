@@ -64,9 +64,8 @@ def tokenize(sent):
 
 
 def load_dataset(batch_size, max_seq_len, vocab_size, word_vectors, vector_cache):
-    inputs = data.Field(lower=False, fix_length=max_seq_len, tokenize=tokenize, init_token='<sos>')
-    #inputs = data.Field(lower=False, fix_length=max_seq_len, init_token='<sos>')
-    #inputs = data.Field(lower=False, fix_length=None)
+    ##inputs = data.Field(lower=False, fix_length=max_seq_len, tokenize=tokenize, init_token='<sos>')
+    inputs = data.Field(lower=False, fix_length=max_seq_len, include_lengths=True, tokenize=tokenize, batch_first=True)
     answers = data.Field(sequential=False)
     train, dev, test = CustomSNLI.splits(inputs, answers)
     print('custom data loading debug:')
@@ -83,7 +82,6 @@ def load_dataset(batch_size, max_seq_len, vocab_size, word_vectors, vector_cache
         makedirs(os.path.dirname(vector_cache))
         torch.save(inputs.vocab.vectors, vector_cache)
 
-
     print('vocab debug:')
     print('ntokens:%d'%len(inputs.vocab))
     print(inputs.vocab.stoi['What'])
@@ -94,7 +92,6 @@ def load_dataset(batch_size, max_seq_len, vocab_size, word_vectors, vector_cache
     print(inputs.vocab.itos[1])
     print(inputs.vocab.itos[2])
     print(inputs.vocab.itos[3])
-
 
     train, dev, test = CustomSNLI.splits(inputs, answers)
     train_iter, val_iter, test_iter = data.BucketIterator.splits(

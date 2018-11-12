@@ -96,7 +96,6 @@ class CustomGRU(nn.Module):
 
 
 class CustomGRUCell(nn.Module):
-
 	"""A custom GRU cell for VNMT-type architecture."""
 
 	def __init__(self, input_size, hidden_size, bias=True):
@@ -159,7 +158,7 @@ class CustomGRUCell(nn.Module):
 			gh = F.linear(hidden, self.w_hh, self.b_hh)
 			# added
 			gc = F.linear(cj, self.w_ch, self.b_ch)
-			
+
 			i_r, i_i, i_n = gi.chunk(3, 1)
 			h_r, h_i, h_n = gh.chunk(3, 1)
 			# added

@@ -55,7 +55,7 @@ def show_attention(filename, input_sentence, output_words, attentions):
 
     show_plot_visdom()
     #plt.show()
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches="tight")
     plt.close()
 
 def evaluate(val_iter, model, n_tokens, eval_batch_size, wv=None):
@@ -74,17 +74,21 @@ def evaluate(val_iter, model, n_tokens, eval_batch_size, wv=None):
         batch.hypothesis.data = batch.hypothesis.data.transpose(1,0)
         _loss = model.batchNLLLoss(batch.premise, batch.hypothesis)
         loss += _loss
-
     return loss / float(len(val_iter))
 
 
 def create_example(inputs, sent, max_seq_len):
-    example = [2]
+    ##example = [2]
+    ##example = [0]
     #example += [1] * (N - len(example)) # 1: <pad>, 2: <sos>
+    example = []
     words = sent.split() # e.g.'Two women and one man are drinking beer in a bar.'
     for i, w in enumerate(words):
         example.append(inputs.vocab.stoi[w])
     example.append(1)
+    print(words)
+    print(example)
+    #fs
     return example
 
 def reverse_input(inp, target):
@@ -215,7 +219,7 @@ def train():
                 show_attention('attn_vis%d_%d'%(epoch,i), sent, output, attns)
 
 
-            
+
 
         print('Epoch train loss:')
         print(train_loss[0])
@@ -251,7 +255,7 @@ def train():
 
     print(train_losses)
     print(val_losses)
-    
+
     # save train/val loss lists
     with open('train_losses.pickle', 'wb') as f:
         pickle.dump(train_losses, f, protocol=pickle.HIGHEST_PROTOCOL)
